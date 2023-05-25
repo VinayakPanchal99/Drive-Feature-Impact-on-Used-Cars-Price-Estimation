@@ -1,0 +1,319 @@
+---
+title: "The Impact of Drive Feature on Price Estimation Accuracy for Pre-Owned Sedans and SUVs"
+output: rmarkdown::github_document
+---
+
+**Problem Statement:** 
+
+My research focus will be on **"Does incorporating the drive feature significantly enhance the accuracy of estimating the prices of pre-owned Sedans and SUVs, as compared to using only the odometer, transmission, type, and condition of the vehicles?"**
+
+**Data Summary:**
+
+The dataset consists of a comprehensive collection of 426,880 used vehicles available for sale in the United States. It includes various details such as the price, make and model, condition, technical specifications, mileage, year of purchase, posting date, location coordinates, and paint color.
+
+For the analysis, we narrowed down the variables to seven essential features. Among these, the drive feature has three categories: rear-wheel drive (rwd), 4-wheel drive (4wd), and front-wheel drive (fwd).
+
+To begin, we filtered the dataset based on the year variable, focusing on vehicles purchased between 2005 and 2020. We then specifically selected data for sedans and SUVs from the type variable. Following that, we eliminated missing values and outliers, resulting in a working dataset of 56,651 used cars with five predictor variables and one outcome variable. A summary of the statistical measures for these variables is calculated, assuming minimum values for odometer and price.
+
+Initially, the residuals of both models did not exhibit a normal distribution. However, after applying a log transformation to the price variable, the residuals of both models displayed a normal distribution, as observed from the QQ plots.
+
+```{r setup, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(knitr)
+library(gridExtra) # For including grids of plots
+library(psych)
+library(ggiraph)
+library(ggiraphExtra)
+library(GGally)#for ggpairs
+library(car)
+```
+
+```{r warning=FALSE, message=FALSE}
+# IMPORT DATASET
+transport.data <- read_csv("vehicles.csv",col_types =cols(year = col_integer(),
+  model = col_factor(),
+  manufacturer = col_factor(),
+  condition = col_factor(),
+  cylinders = col_factor(),
+  fuel = col_factor(),
+  odometer = col_integer(),
+  transmission = col_factor(),
+  drive = col_factor(),
+  size = col_factor(),
+  type = col_factor(),
+  paint_color = col_factor(),
+  price = col_double()))
+
+# Checking missing values
+transport.data.missing <- transport.data %>% summarise_all(~ sum(is.na(.)))
+#transport.data.missing
+
+# filtering unusefull data from dataset
+transport.data.select <- transport.data %>% select(year,condition,odometer,transmission,drive,type,price)
+transport.data.sel <- transport.data.select %>% summarise_all(~ sum(is.na(.)))
+transport.data.main <- na.omit(transport.data.select)
+transport.data.main <- transport.data.main %>% filter(year>=2005,!year %in% c(2021,2022),odometer!=0,price!=0)
+#summary(transport.data.main)
+
+# WORKING DATASTET
+car.data <- transport.data.main %>% filter(type %in% c("SUV","sedan"))
+car.data <- car.data[,-c(1)] 
+car.data.main <- car.data %>% filter(between(price,5000,50000),between(odometer,10000,200000)) %>% mutate(price=log(price)) #LOG of price to make residuals normally distributed
+
+car.data.main %>% ggplot(aes(seq(odometer),odometer)) + geom_boxplot()
+
+car.data.main %>% ggplot(aes(seq(price),price)) + geom_boxplot()
+
+summary(car.data.main)
+
+car.data.main %>% ggplot(aes(odometer,price)) + geom_point() + geom_smooth(method = "lm")
+
+```
+
+```{r message=FALSE}
+#Checking variable relations
+ggpairs(car.data.main)
+```
+
+**Objective Plan**
+
+To conduct the analysis, we constructed two multiple linear regression models. **Model 1** included odometer, drive, transmission, type, and condition as predictor variables, while **Model 2** included odometer, transmission, type, and condition as predictor variables. The target variable for both models was the price of used cars. Before running the linear regression, we converted the categorical variables into dummy variables (indicator variables). The default values for the features were set as follows: drive - front-wheel drive (fwd), transmission - other, type - sedan, and condition - salvage.
+
+```{r}
+# DUMMY VARIABLES
+car.data.main$type <- factor(car.data.main$type, levels = c("SUV","sedan"))
+
+#transmission
+car.data.main$transmission <- factor(car.data.main$transmission, levels = c("automatic","manual","other"))
+
+automat_v_other <- c(1,0,0)
+manual_v_other <- c(0,1,0)
+contrasts(car.data.main$transmission) <- cbind(automat_v_other,manual_v_other)
+contrasts(car.data.main$transmission)
+
+#type
+SUV_v_sedan <- c(1,0)
+contrasts(car.data.main$type) <- cbind(SUV_v_sedan)
+contrasts(car.data.main$type)
+
+#drive
+rwd_v_fwd <- c(1,0,0)
+x4wd_v_fwd <- c(0,1,0)
+contrasts(car.data.main$drive) <- cbind(rwd_v_fwd,x4wd_v_fwd)
+contrasts(car.data.main$drive)
+
+#conditions
+good_v_sal <- c(1,0,0,0,0,0)
+excel_v_sal <- c(0,1,0,0,0,0)
+fair_v_sal <- c(0,0,1,0,0,0)
+lknew_v_sal <- c(0,0,0,1,0,0)
+new_v_sal <- c(0,0,0,0,1,0)
+contrasts(car.data.main$condition) <- cbind(good_v_sal,excel_v_sal,fair_v_sal,lknew_v_sal,new_v_sal)
+contrasts(car.data.main$condition)
+```
+
+Before running the model, we ensured that all predictor variables were either categorical or quantitative, while the outcome variable was quantitative, continuous, and without bounds. We also confirmed that the predictor data exhibited variation in values, indicating non-zero variance. Furthermore, we assumed that there were no external factors influencing the predictor variables.
+
+**MODEL 1 \< WITH DRIVE FEATURE\>**
+
+```{r}
+# MULTIPLE LINEAR REG : MODEL 1 < WITH DRIVE FEATURE>
+album.model <- lm(price ~ odometer+drive+transmission+type+condition, data = car.data.main)
+```
+
+**Assumption: MULTICOLLINEARITY**
+
+In Model 1, we examined the maximum Variance Inflation Factor (VIF), which was found to be less than 10. The average VIF value was close to 1, and the minimum tolerance exceeded the thresholds of 0.1 (considered a serious problem) and 0.2 (considered a potential problem). Therefore, we can conclude that there is no presence of multicollinearity in the data.
+
+```{r}
+# Assumptions checking
+
+#Multicollinearity 
+vif(album.model)
+tolerance = 1/vif(album.model)
+tolerance
+mean(vif(album.model)[11:15])
+```
+
+**Assumption: INDEPENDENCE**
+
+For checking residuals are independent we use the Durbin-Watson test, for Model 1 the values are close to 2. So no autocorrelation among residuals and the assumption of independence is met.
+
+```{r}
+# Assumptions checking
+
+#independence
+durbinWatsonTest(album.model)
+```
+
+**Assumption: Homoscedacity and Linearity and Normality**
+
+The residuals in Model 1 is linear but is heteroscedastic as seen from the residual vs fitted plot.
+
+```{r}
+# Assumptions checking
+
+#homoscedacity and linearity and normality
+plot(album.model)
+```
+
+**Analysis: INFLUENTIAL POINTS**
+
+To identify influential cases, we calculated Cook's distance for both models. The maximum value obtained for Model 1 was significantly below 1. Based on this analysis, we can conclude that there are no influential cases in Model 1.
+
+```{r}
+# Assumptions checking
+
+#checking influence points
+car.data.main1 <- car.data.main
+car.data.main1$cd <- cooks.distance(album.model)
+plot(sort(car.data.main1$cd , decreasing=TRUE))
+max(car.data.main1$cd)
+```
+
+**Analysis: OUTLIERS CHECKING**
+
+When examining the presence of outliers using standardized residuals within a 95% range, we discovered that in Model 1, the residuals represented 5.5% of observations that fell above or below 1.96 standard deviations. However, none of these observations were considered outliers.
+
+```{r}
+# Assumptions checking
+
+# outliers residual
+car.data.main1$fitted <- album.model$fitted
+car.data.main1$residuals <- album.model$residuals
+car.data.main1$standardized.residuals <- rstandard(album.model)
+
+possible.outliers1 <- subset(car.data.main1, standardized.residuals < -1.96 | standardized.residuals > 1.96)
+#possible.outliers1
+```
+
+Now that we have checked all the assumptions of the linear model, we will now check the model results:
+
+In Model 1, all five predictor variables, including the intercept, exhibited a significant influence on the price of used cars at a 5% level of significance. The model achieved an R-squared value of 0.6126 and an adjusted R-squared value of 0.6125. This indicates that the odometer, drive, transmission, type, and condition of the car collectively explain 61.26% of the variance in the price of used SUVs and sedans.
+
+Specifically, for cars with rear-wheel drive (rwd), the price increased by a factor of 0.364, and for cars with 4-wheel drive (4wd), the price increased by a factor of 0.274, both with p-values less than 0.01. The estimate for front-wheel drive (fwd) is accounted for by the intercept of the model.
+
+The model coefficients and their corresponding 95% confidence intervals provide additional information on the relationship between the predictor variables and the price of used cars which is stated below.
+
+```{r}
+summary(album.model)
+```
+
+CONFIDENCE INTERVALS:
+
+```{r}
+#confidence interval of MODEL 1
+confint(album.model)
+```
+
+**MODEL 2 \< WITHOUT DRIVE FEATURE\>**
+
+```{r}
+# MULTIPLE LINEAR REG : MODEL 2 < WITHOUT DRIVE FEATURE>
+album2.model <- lm(price ~ odometer+transmission+type+condition, data = car.data.main)
+```
+
+**Assumption: MULTICOLLINEARITY**
+
+In Model 2, we examined the maximum Variance Inflation Factor (VIF), which was found to be less than 10. The average VIF value was close to 1, and the minimum tolerance exceeded the thresholds of 0.1 (considered a serious problem) and 0.2 (considered a potential problem). Therefore, we can conclude that there is no presence of multicollinearity in the data.
+
+```{r}
+# Assumptions CHECKING
+
+#Multicolinearity 
+vif(album2.model)
+tolerance = 1/vif(album2.model)
+tolerance
+mean(vif(album2.model)[9:12])
+```
+
+**Assumption: INDEPENDENCE**
+
+For checking residuals are independent we use the Durbin-Watson test, for Model 2 the values are close to 2. So no autocorrelation among residuals and the assumption of independence is met.
+
+```{r}
+# Assumptions CHECKING
+
+#independence
+durbinWatsonTest(album2.model)
+```
+
+**Assumption: Homoscedacity and Linearity and Normality**
+
+The residuals in Model 2 is linear but is heteroscedastic as seen from the residual vs fitted plot.
+
+```{r}
+# Assumptions CHECKING
+
+#homoscedacity and linearity and normality
+plot(album2.model)
+```
+
+**Analysis: INFLUENTIAL POINTS**
+
+To identify influential cases, we calculated Cook's distance for both models. The maximum value obtained for Model 2 was significantly below 1. Based on this analysis, we can conclude that there are no influential cases in Model 2.
+
+```{r}
+# Assumptions CHECKING
+
+#checking influence points
+car.data.main2 <- car.data.main
+car.data.main2$cd <- cooks.distance(album2.model)
+plot(sort(car.data.main2$cd , decreasing=TRUE))
+max(car.data.main2$cd)
+```
+
+**Analysis: OUTLIERS CHECKING**
+
+When examining the presence of outliers using standardized residuals within a 95% range, we discovered that in Model 2, the residuals accounted for 5.1% of observations outside this range. However, none of these observations were considered outliers.
+
+```{r}
+# Assumptions CHECKING
+
+# outliers residual
+car.data.main2$fitted <- album2.model$fitted
+car.data.main2$residuals <- album2.model$residuals
+car.data.main2$standardized.residuals <- rstandard(album2.model)
+
+possible.outliers2 <- subset(car.data.main2, standardized.residuals < -1.96 | standardized.residuals > 1.96)
+#possible.outliers2
+```
+
+Now that we have checked all the assumptions of the linear model, we will now check the model results:
+
+In Model 2, all four predictor variables, along with the intercept, demonstrate a significant influence on the price of used cars at a 5% level of significance. The model achieved an R-squared value of 0.5465 and an adjusted R-squared value of 0.5464. This indicates that the odometer, transmission, type, and condition of the car collectively explain 54.65% of the variance in the price of used SUVs and sedans.
+
+The regression coefficients and their corresponding 95% confidence intervals, offer further insights into the relationships between the predictor variables and the price of used cars as stated bellow.
+
+```{r}
+summary(album2.model)
+```
+
+CONFIDENCE INTERVALS:
+
+```{r}
+# Confidence Interval MODEL 2
+confint(album2.model)
+```
+
+**ANOVA: MODEL COMPARISION**
+
+To compare the two models, we conducted an analysis of variance (ANOVA) test. The results indicated a degree of freedom (Df) of -2 and a p-value of less than 0.001. This suggests that the more complex Model 1, which includes the drive feature, outperforms the less complex Model 2. Therefore, we can conclude that Model 1 demonstrates a significant improvement over Model 2 at a 5% level of significance.
+
+```{r}
+# model comparison: ANOVA 
+anova(album.model,album2.model)
+```
+
+**Conclusion**
+
+We constructed two multiple linear regression models to analyze the impact of including or excluding the drive feature on the predicted price of used SUVs and sedans. The default features in both models were mileage, transmission, type, and condition of the cars. While most assumptions of linear models were satisfied, we observed violation of the homoscedasticity assumption in the residuals.
+
+Comparing the two models, we found that Model 1, which incorporated the drive feature, explained an additional 6% variance in car prices compared to Model 2, which did not include this feature. The ANOVA test confirmed that retaining the drive feature in the model yielded better results than excluding it.
+
+It is important to note that these models may not be reliable for accurate price predictions due to the violation of certain assumptions. To improve predictions, options include enhancing the dataset quality or exploring alternative models.
+
+In summary, adding the drive feature significantly improved the model's ability to predict the price of used SUVs and sedans. However, caution should be exercised as the violated assumptions may impact the reliability of the models.
